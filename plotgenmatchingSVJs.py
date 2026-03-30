@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import networkx as nx
 
 # --- CONFIGURATION ---
-ROOT_FILE = sys.argv[1] if len(sys.argv) > 1 else "/lustre/research/hep/akshriva/SVJ_RandD/trainingdata_maker/training_data/SVJ_Training_2D_20260316_2324/s-channel_mmed-2000_Nc-2_Nf-2_scale-35.1539_mq-10_mpi-10.08_mrho-88.96_pvector-0.75_spectrum-cms_gq-0.25_gchi-0.5_rinv-0.3/events.root"
+ROOT_FILE = sys.argv[1] if len(sys.argv) > 1 else "/lustre/research/hep/akshriva/SVJ_RandD/TrainingDatamaker/SVJ_Training_2D_20260328_1534/s-channel_mmed-2000_Nc-2_Nf-2_scale-35.1539_mq-10_mpi-10.01_mrho-55.65_pvector-0.75_spectrum-cms_gq-0.25_gchi-0.5_rinv-0.3/events.root"
 PLOT_DIR = "plots"
 if not os.path.exists(PLOT_DIR): os.makedirs(PLOT_DIR)
 
@@ -161,7 +161,7 @@ if scatter_event_idx is not None:
     axes[2].legend()
 
 plt.tight_layout()
-plt.savefig(f"{PLOT_DIR}/svj_substructure_profile.pdf")
+plt.savefig(f"{PLOT_DIR}/svj_substructure_profile_one.pdf")
 
 
 # =========================================================================
@@ -704,6 +704,7 @@ def make_3d_sideview_plot(ev, nsvj_label, outpath, max_depth=16):
 
     fig_3d = plt.figure(figsize=(14, 8))
     ax_3d = fig_3d.add_axes([0.05, 0.1, 0.65, 0.8], projection='3d')
+    
 
     # Draw edges
     for parent, child in edges:
@@ -749,7 +750,7 @@ def make_3d_sideview_plot(ev, nsvj_label, outpath, max_depth=16):
     )
 
     # Side view
-    ax_3d.view_init(elev=0, azim=-90)
+    ax_3d.view_init(elev=0, azim=-60)
 
     ax_3d.set_xlabel('Decay Depth', labelpad=10)
     ax_3d.set_ylabel(r'$\phi$', labelpad=10)
@@ -768,4 +769,341 @@ for n in target_nsvj_values:
     if n in representative_events:
         ev = representative_events[n]
         outpath = f"{PLOT_DIR}/3D_decay_tree_nSVJ{n}.pdf"
+        make_3d_sideview_plot(ev, n, outpath)
+
+
+
+def get_particle_color(pid):
+    if pid == 4900023:
+        return 'red'         # Z'
+    elif pid in DARK_QUARKS:
+        return 'orange'      # dark quarks
+    elif pid == 4900021:
+        return 'salmon'      # dark gluon
+    elif pid in DARK_HADRONS:
+        return 'purple'      # dark hadrons
+    elif pid in [51, 53]:
+        return 'black'       # invisible dark matter
+    elif pid in [12, 14, 16]:
+        return 'dimgray'     # SM neutrinos
+    elif pid in [1, 2, 3, 4, 5, 6]:
+        return 'green'       # SM quarks
+    elif pid in [11, 13, 15]:
+        return 'blue'        # charged leptons
+    elif pid == 22:
+        return 'lightgreen'  # photons
+    else:
+        return 'lightblue'   # anything else
+    
+
+def make_3d_sideview_plot(ev, nsvj_label, outpath, max_depth=16, show_jet_plane=True):
+    pids = gen_pid[ev]
+    etas = gen_eta[ev]
+    phis = gen_phi[ev]
+    d1s  = gen_d1[ev]
+    d2s  = gen_d2[ev]
+
+    pids_np_signed = ak.to_numpy(pids)
+    pids_np_abs = np.abs(pids_np_signed)
+
+    # Invisible particle IDs you want to highlight
+    INVISIBLE_PIDS = {51, 53, 12, 14, 16}
+
+    dark_quark_idx = np.where(np.isin(pids_np_abs, DARK_QUARKS))[0]
+    if len(dark_quark_idx) == 0:
+        print(f"  Event {ev}: no dark quark found, skipping nSVJ={nsvj_label}")
+        return
+
+    first_dq_idx = dark_quark_idx[0]
+    zprime_idx = np.where(pids_np_abs == 4900023)[0]
+    start_idx = zprime_idx[0] if len(zprime_idx) > 0 else first_dq_idx
+
+    node_coords = {}
+    edges = []
+
+    def wrap_phi(phi):
+        return (phi + np.pi) % (2 * np.pi) - np.pi
+
+    def build_3d_data(idx, depth=0):
+        if depth > max_depth or idx < 0 or idx >= len(pids):
+            return
+        if idx in node_coords:
+            return
+
+        eta = float(etas[idx])
+        phi = float(phis[idx])
+        pid_signed = int(pids_np_signed[idx])
+        pid_abs = int(pids_np_abs[idx])
+
+        if np.isnan(eta) or np.isinf(eta) or np.abs(eta) > 10:
+            eta = 0.0
+        if np.isnan(phi) or np.isinf(phi):
+            phi = 0.0
+        phi = wrap_phi(phi)
+
+        is_invisible = pid_abs in INVISIBLE_PIDS
+
+        node_coords[idx] = {
+            "depth": depth,
+            "phi": phi,
+            "eta": eta,
+            "pid_abs": pid_abs,
+            "pid_signed": pid_signed,
+            "is_invisible": is_invisible,
+        }
+
+        d1 = int(d1s[idx])
+        d2 = int(d2s[idx])
+
+        if d1 >= 0 and d2 >= 0 and d1 <= d2:
+            for d_idx in range(d1, d2 + 1):
+                if 0 <= d_idx < len(pids):
+                    edges.append((idx, d_idx))
+                    build_3d_data(d_idx, depth + 1)
+        elif d1 >= 0 and d1 < len(pids):
+            edges.append((idx, d1))
+            build_3d_data(d1, depth + 1)
+
+    build_3d_data(start_idx, depth=0)
+
+    if len(node_coords) == 0:
+        print(f"  Event {ev}: empty decay tree, skipping nSVJ={nsvj_label}")
+        return
+
+    fig_3d = plt.figure(figsize=(15, 9))
+    ax_3d = fig_3d.add_axes([0.05, 0.08, 0.68, 0.84], projection='3d')
+
+    # ---------------------------------------------------------
+    # Ranges for better scaling
+    # ---------------------------------------------------------
+    all_phis = np.array([node_coords[i]["phi"] for i in node_coords])
+    all_etas = np.array([node_coords[i]["eta"] for i in node_coords])
+
+    phi_min = min(np.min(all_phis), -np.pi)
+    phi_max = max(np.max(all_phis),  np.pi)
+    eta_min = min(np.min(all_etas), -4.0)
+    eta_max = max(np.max(all_etas),  4.0)
+
+    phi_pad = 0.6
+    eta_pad = 0.6
+
+    jet_plane_depth = max_depth + 1.5
+
+    # ---------------------------------------------------------
+    # Optional transparent jet plane at fixed depth
+    # ---------------------------------------------------------
+    if show_jet_plane:
+        phi_grid = np.linspace(phi_min - phi_pad, phi_max + phi_pad, 50)
+        eta_grid = np.linspace(eta_min - eta_pad, eta_max + eta_pad, 50)
+        Phi, Eta = np.meshgrid(phi_grid, eta_grid)
+        X = np.full_like(Phi, jet_plane_depth)
+
+        ax_3d.plot_surface(
+            X, Phi, Eta,
+            alpha=0.06,
+            color='gray',
+            edgecolor='none',
+            zorder=0
+        )
+
+    # ---------------------------------------------------------
+    # Draw edges
+    # ---------------------------------------------------------
+    for parent, child in edges:
+        if parent in node_coords and child in node_coords:
+            p = node_coords[parent]
+            c = node_coords[child]
+            ax_3d.plot(
+                [p["depth"], c["depth"]],
+                [p["phi"],   c["phi"]],
+                [p["eta"],   c["eta"]],
+                color='gray',
+                linewidth=0.8,
+                alpha=0.35
+            )
+
+    # ---------------------------------------------------------
+    # Draw nodes
+    # ---------------------------------------------------------
+    for idx, info in node_coords.items():
+        depth = info["depth"]
+        phi   = info["phi"]
+        eta   = info["eta"]
+        pid   = info["pid_abs"]
+        is_invisible = info["is_invisible"]
+
+        color = get_particle_color(pid)
+
+        if is_invisible:
+            ax_3d.scatter(
+                depth, phi, eta,
+                c=color,
+                s=70,
+                marker='D',
+                edgecolors='yellow',
+                linewidth=1.0,
+                alpha=1.0
+            )
+            ax_3d.text(
+                depth + 0.1, phi, eta,
+                f"invis {pid}",
+                fontsize=7,
+                color='black'
+            )
+
+            # optional guide line to jet plane
+            ax_3d.plot(
+                [depth, jet_plane_depth],
+                [phi,   phi],
+                [eta,   eta],
+                color='black',
+                linestyle=':',
+                linewidth=0.8,
+                alpha=0.35
+            )
+        else:
+            ax_3d.scatter(
+                depth, phi, eta,
+                c=color,
+                s=42,
+                edgecolors='white',
+                linewidth=0.35,
+                alpha=0.95
+            )
+
+    # ---------------------------------------------------------
+    # Draw reco / gen jet circles in (phi, eta) plane
+    # ---------------------------------------------------------
+    theta = np.linspace(0, 2*np.pi, 300)
+
+    # Reco jets
+    if len(rf_eta[ev]) > 0:
+        reco_etas = ak.to_numpy(rf_eta[ev])
+        reco_phis = ak.to_numpy(rf_phi[ev])
+        reco_pts  = ak.to_numpy(rf_pt[ev])
+
+        for j, (jeta, jphi, jpt) in enumerate(zip(reco_etas, reco_phis, reco_pts)):
+            if np.isnan(jeta) or np.isnan(jphi) or np.isinf(jeta) or np.isinf(jphi):
+                continue
+
+            jphi = wrap_phi(jphi)
+
+            y_circle = wrap_phi(jphi + FATJET_R * np.cos(theta))
+            z_circle = jeta + FATJET_R * np.sin(theta)
+            x_circle = np.full_like(theta, jet_plane_depth)
+
+            ax_3d.plot(
+                x_circle, y_circle, z_circle,
+                color='black',
+                linewidth=2.4,
+                alpha=0.95
+            )
+
+            ax_3d.scatter(
+                jet_plane_depth, jphi, jeta,
+                color='black',
+                s=45,
+                marker='x',
+                linewidths=1.7
+            )
+
+            ax_3d.text(
+                jet_plane_depth + 0.18, jphi, jeta,
+                f"Reco {j}\n$p_T$={jpt:.0f}",
+                fontsize=8,
+                color='black'
+            )
+
+    # Gen jets
+    if len(gf_eta[ev]) > 0:
+        gen_etas = ak.to_numpy(gf_eta[ev])
+        gen_phis = ak.to_numpy(gf_phi[ev])
+        gen_pts  = ak.to_numpy(gf_pt[ev])
+
+        for j, (jeta, jphi, jpt) in enumerate(zip(gen_etas, gen_phis, gen_pts)):
+            if np.isnan(jeta) or np.isnan(jphi) or np.isinf(jeta) or np.isinf(jphi):
+                continue
+
+            jphi = wrap_phi(jphi)
+
+            y_circle = wrap_phi(jphi + FATJET_R * np.cos(theta))
+            z_circle = jeta + FATJET_R * np.sin(theta)
+            x_circle = np.full_like(theta, jet_plane_depth - 0.35)
+
+            ax_3d.plot(
+                x_circle, y_circle, z_circle,
+                color='deepskyblue',
+                linestyle='--',
+                linewidth=2.0,
+                alpha=0.9
+            )
+
+            ax_3d.scatter(
+                jet_plane_depth - 0.35, jphi, jeta,
+                color='deepskyblue',
+                s=28,
+                marker='o'
+            )
+
+    # ---------------------------------------------------------
+    # Legend
+    # ---------------------------------------------------------
+    legend_elements = [
+        mlines.Line2D([0], [0], marker='o', color='w', label="Z' (4900023)", markerfacecolor='red', markersize=10),
+        mlines.Line2D([0], [0], marker='o', color='w', label='Dark Quarks', markerfacecolor='orange', markersize=10),
+        mlines.Line2D([0], [0], marker='o', color='w', label='Dark Gluons', markerfacecolor='salmon', markersize=10),
+        mlines.Line2D([0], [0], marker='o', color='w', label='Dark Hadrons', markerfacecolor='purple', markersize=10),
+        mlines.Line2D([0], [0], marker='o', color='w', label='Invisible particles', markerfacecolor='black', markersize=10),
+        mlines.Line2D([0], [0], marker='o', color='w', label='SM Quarks', markerfacecolor='green', markersize=10),
+        mlines.Line2D([0], [0], marker='o', color='w', label='SM Leptons', markerfacecolor='blue', markersize=10),
+        mlines.Line2D([0], [0], marker='o', color='w', label='Photons', markerfacecolor='lightgreen', markersize=10),
+        mlines.Line2D([0], [0], marker='o', color='w', label='Other Particles', markerfacecolor='lightblue', markersize=10),
+        mlines.Line2D([0], [0], color='black', lw=2.4, label=f"Reco jet cone ($R={FATJET_R}$)"),
+        mlines.Line2D([0], [0], color='deepskyblue', lw=2.0, linestyle='--', label=f"Gen jet cone ($R={FATJET_R}$)")
+    ]
+
+    ax_3d.legend(
+        handles=legend_elements,
+        loc='center left',
+        bbox_to_anchor=(1.02, 0.5),
+        fontsize=10,
+        frameon=True,
+        shadow=True,
+        title="Particle / Jet Objects"
+    )
+
+    # ---------------------------------------------------------
+    # Axes / view / scaling
+    # ---------------------------------------------------------
+    ax_3d.set_xlabel('Decay Depth', labelpad=10)
+    ax_3d.set_ylabel(r'$\phi$', labelpad=10)
+    ax_3d.set_zlabel(r'$\eta$', labelpad=10)
+
+    ax_3d.set_xlim(0, jet_plane_depth + 1.2)
+    ax_3d.set_ylim(phi_min - phi_pad, phi_max + phi_pad)
+    ax_3d.set_zlim(eta_min - eta_pad, eta_max + eta_pad)
+
+    # Better aspect so jet circles do not look wildly squashed
+    depth_span = jet_plane_depth + 1.2
+    phi_span = (phi_max - phi_min) + 2 * phi_pad
+    eta_span = (eta_max - eta_min) + 2 * eta_pad
+    ax_3d.set_box_aspect((depth_span, phi_span, eta_span))
+
+    # Better viewing angle than perfectly flat
+    ax_3d.view_init(elev=15, azim=-58)
+
+    plt.title(f"Side-View: Decay Tree for Event {ev} (nSVJs = {nsvj_label})", fontsize=16)
+    plt.savefig(outpath, bbox_inches='tight', dpi=200)
+    plt.close(fig_3d)
+
+    n_invis = sum(node_coords[i]["is_invisible"] for i in node_coords)
+    print(f"  Saved {outpath}  | invisible particles shown: {n_invis}")
+
+# ---------------------------------------------------------
+# Make plots for nSVJ = 0,1,2,3,4
+# ---------------------------------------------------------
+for n in target_nsvj_values:
+    if n in representative_events:
+        ev = representative_events[n]
+        outpath = f"{PLOT_DIR}/3D_decay_tree_nSVJ{n}_wjetcones.pdf"
         make_3d_sideview_plot(ev, n, outpath)
