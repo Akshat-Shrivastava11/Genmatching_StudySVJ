@@ -4,7 +4,7 @@ import uproot
 import awkward as ak
 import matplotlib.pyplot as plt
 
-ROOT_FILE = sys.argv[1] if len(sys.argv) > 1 else "/lustre/research/hep/akshriva/SVJ_RandD/trainingdata_maker/training_data/SVJ_Training_2D_20260316_2324/s-channel_mmed-2000_Nc-2_Nf-2_scale-35.1539_mq-10_mpi-10.08_mrho-88.96_pvector-0.75_spectrum-cms_gq-0.25_gchi-0.5_rinv-0.3/events.root"
+ROOT_FILE = sys.argv[1] if len(sys.argv) > 1 else "/lustre/research/hep/akshriva/SVJ_RandD/TrainingDatamaker/training_data/SVJ_Training_2D_20260316_2324/s-channel_mmed-2000_Nc-2_Nf-2_scale-35.1539_mq-10_mpi-10.08_mrho-88.96_pvector-0.75_spectrum-cms_gq-0.25_gchi-0.5_rinv-0.3/events.root"
 PLOT_DIR = "plots"
 import os
 if not os.path.exists(PLOT_DIR): os.makedirs(PLOT_DIR)
